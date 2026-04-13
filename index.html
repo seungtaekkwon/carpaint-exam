@@ -29,7 +29,8 @@
         <div>
           <label for="nickname">닉네임</label>
           <input id="nickname" type="text" maxlength="12" placeholder="2~12자, 한글/영문/숫자" />
-          <p class="help">시험 시작 전에 닉네임을 입력해 주세요. 같은 닉네임이면 오답 기록과 랭킹이 이어집니다.</p>
+          <p class="help">시험 시작 전에 닉네임을 입력해 주세요. 같은 닉네임이면 문제별 오답 기록이 이어집니다.</p>
+          <p class="help"><a href="./admin.html">관리자 페이지</a></p>
         </div>
         <div class="rules">
           <p>• 매 접속 시 랜덤 60문항이 출제됩니다.</p>
@@ -55,7 +56,7 @@
 
     <section id="resultCard" class="card hidden">
       <h2>시험 결과</h2>
-      <div class="result-grid">
+      <div class="result-grid simple">
         <div class="metric">
           <span>총점</span>
           <strong id="scoreText">0점</strong>
@@ -68,15 +69,6 @@
           <span>소요 시간</span>
           <strong id="elapsedText">00:00</strong>
         </div>
-        <div class="metric">
-          <span>랭킹 저장</span>
-          <strong id="rankingStatus">대기</strong>
-        </div>
-      </div>
-
-      <div class="rank-card">
-        <h3>랭킹</h3>
-        <div id="rankingList" class="ranking-list"></div>
       </div>
 
       <div class="result-actions">

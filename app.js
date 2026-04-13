@@ -5,13 +5,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
-  increment,
-  collection,
-  query,
-  orderBy,
-  limit,
-  getDocs,
-  serverTimestamp
+  increment
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const EXAM_COUNT = 60;
@@ -34,8 +28,6 @@ const nicknameDisplay = document.getElementById("nicknameDisplay");
 const scoreText = document.getElementById("scoreText");
 const correctText = document.getElementById("correctText");
 const elapsedText = document.getElementById("elapsedText");
-const rankingStatus = document.getElementById("rankingStatus");
-const rankingList = document.getElementById("rankingList");
 const toast = document.getElementById("toast");
 
 let db = null;
@@ -90,9 +82,7 @@ function chooseBalancedQuestions(allQuestions, count) {
     if (!byCat.has(q.category)) byCat.set(q.category, []);
     byCat.get(q.category).push(q);
   }
-  for (const list of byCat.values()) {
-    list.sort(() => Math.random() - 0.5);
-  }
+  for (const list of byCat.values()) list.sort(() => Math.random() - 0.5);
 
   const cats = [...byCat.keys()];
   const total = allQuestions.length;
@@ -106,13 +96,13 @@ function chooseBalancedQuestions(allQuestions, count) {
 
   let assigned = targetByCat.reduce((sum, x) => sum + x.target, 0);
   while (assigned > count) {
-    const item = targetByCat.sort((a, b) => b.target - a.target).find(x => x.target > 1);
+    const item = [...targetByCat].sort((a, b) => b.target - a.target).find(x => x.target > 1);
     if (!item) break;
     item.target -= 1;
     assigned -= 1;
   }
   while (assigned < count) {
-    const item = targetByCat.sort((a, b) => byCat.get(b.cat).length - byCat.get(a.cat).length)[0];
+    const item = [...targetByCat].sort((a, b) => byCat.get(b.cat).length - byCat.get(a.cat).length)[0];
     item.target += 1;
     assigned += 1;
   }
@@ -146,8 +136,7 @@ function updateSubmitState() {
 }
 
 function getFirstUnanswered() {
-  for (let i = 0; i < selectedQuestions.length; i++) {
-    const q = selectedQuestions[i];
+  for (const q of selectedQuestions) {
     if (!(q.id in answers)) return q;
   }
   return null;
@@ -199,7 +188,7 @@ function lockAllChoices() {
 
 function revealResults(extraWarnings = {}) {
   let correct = 0;
-  selectedQuestions.forEach((q, idx) => {
+  selectedQuestions.forEach((q) => {
     const selected = answers[q.id];
     if (selected === q.answer) correct += 1;
 
@@ -242,9 +231,7 @@ function startTimer() {
 function loadFirebase() {
   try {
     const config = window.FIREBASE_CONFIG;
-    if (!config || !config.apiKey || config.apiKey === "REPLACE_ME") {
-      throw new Error("config missing");
-    }
+    if (!config || !config.apiKey || config.apiKey === "REPLACE_ME") throw new Error("config missing");
     const app = initializeApp(config);
     db = getFirestore(app);
   } catch (e) {
@@ -258,80 +245,28 @@ async function fetchQuestions() {
   questions = await res.json();
 }
 
-async function recordAttempt(score, elapsedSeconds, warningsMap) {
-  if (!db) {
-    rankingStatus.textContent = "Firebase 미연결";
-    return;
-  }
+async function recordWrongAttempts(warningsMap) {
+  if (!db || !nickname) return;
 
-  try {
-    const userRef = doc(db, "users", nickname);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) {
-      await setDoc(userRef, {
-        nickname,
-        bestScore: score,
-        bestElapsed: elapsedSeconds,
-        updatedAt: serverTimestamp()
-      });
-    } else {
-      const old = userSnap.data();
-      const shouldUpdate = score > (old.bestScore ?? -1) || (score === (old.bestScore ?? -1) && elapsedSeconds < (old.bestElapsed ?? 999999));
-      if (shouldUpdate) {
-        await updateDoc(userRef, {
-          bestScore: score,
-          bestElapsed: elapsedSeconds,
-          updatedAt: serverTimestamp()
-        });
+  for (const q of selectedQuestions) {
+    const selected = answers[q.id];
+    if (selected !== q.answer) {
+      const wrongRef = doc(db, "users", nickname, "wrongQuestions", String(q.id));
+      const wrongSnap = await getDoc(wrongRef);
+      if (!wrongSnap.exists()) {
+        await setDoc(wrongRef, { count: 1, questionId: q.id });
+        warningsMap[q.id] = false;
+      } else {
+        await updateDoc(wrongRef, { count: increment(1) });
+        const nextCount = (wrongSnap.data().count || 0) + 1;
+        warningsMap[q.id] = nextCount >= WRONG_THRESHOLD;
+      }
+      const userRef = doc(db, "users", nickname);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        await setDoc(userRef, { nickname });
       }
     }
-
-    for (const q of selectedQuestions) {
-      const selected = answers[q.id];
-      if (selected !== q.answer) {
-        const wrongRef = doc(db, "users", nickname, "wrongQuestions", String(q.id));
-        const wrongSnap = await getDoc(wrongRef);
-        if (!wrongSnap.exists()) {
-          await setDoc(wrongRef, { count: 1, questionId: q.id, updatedAt: serverTimestamp() });
-          warningsMap[q.id] = false;
-        } else {
-          await updateDoc(wrongRef, { count: increment(1), updatedAt: serverTimestamp() });
-          const nextCount = (wrongSnap.data().count || 0) + 1;
-          warningsMap[q.id] = nextCount >= WRONG_THRESHOLD;
-        }
-      }
-    }
-
-    rankingStatus.textContent = "저장 완료";
-  } catch (e) {
-    rankingStatus.textContent = "저장 실패";
-  }
-}
-
-async function loadRanking() {
-  if (!db) {
-    rankingList.innerHTML = '<div class="help">Firebase 미연결 상태입니다.</div>';
-    return;
-  }
-  try {
-    const qy = query(collection(db, "users"), orderBy("bestScore", "desc"), orderBy("bestElapsed", "asc"), limit(20));
-    const snap = await getDocs(qy);
-    const docs = snap.docs.map(d => d.data());
-    if (!docs.length) {
-      rankingList.innerHTML = '<div class="help">아직 랭킹 데이터가 없습니다.</div>';
-      return;
-    }
-    rankingList.innerHTML = docs.map((item, i) => `
-      <div class="rank-item">
-        <div class="rank-pos">${i + 1}위</div>
-        <div class="rank-name">${escapeHtml(item.nickname || "-")}</div>
-        <div class="rank-score">${item.bestScore ?? 0}점</div>
-        <div class="rank-time">${formatTime(item.bestElapsed ?? 0)}</div>
-      </div>
-    `).join("");
-  } catch (e) {
-    rankingList.innerHTML = '<div class="help">랭킹을 불러오지 못했습니다.</div>';
   }
 }
 
@@ -356,17 +291,18 @@ async function handleSubmit(auto = false) {
   const score = Math.round((correct / EXAM_COUNT) * 100);
   const elapsed = EXAM_MINUTES * 60 - Math.max(remainingSeconds, 0);
 
+  try {
+    await recordWrongAttempts(warningsMap);
+  } catch (e) {
+    // ignore for non-critical flow
+  }
+
+  correct = revealResults(warningsMap);
   nicknameDisplay.textContent = nickname;
   scoreText.textContent = `${score}점`;
   correctText.textContent = `${correct} / ${EXAM_COUNT}`;
   elapsedText.textContent = formatTime(elapsed);
   resultCard.classList.remove("hidden");
-
-  await recordAttempt(score, elapsed, warningsMap);
-
-  // Re-render with warnings after DB save
-  correct = revealResults(warningsMap);
-  await loadRanking();
   resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -379,7 +315,6 @@ function resetExam() {
   statusCard.classList.remove("hidden");
   examContainer.classList.remove("hidden");
   resultCard.classList.add("hidden");
-  rankingStatus.textContent = "대기";
   nicknameDisplay.textContent = nickname;
   renderQuestions();
   updateProgress();
@@ -405,11 +340,7 @@ retryBtn.addEventListener("click", () => resetExam());
 async function init() {
   loadFirebase();
   await fetchQuestions();
-  submitBtn.classList.add("soft-disabled");
-  submitBtn.setAttribute("aria-disabled", "true");
-  await loadRanking();
+  updateSubmitState();
 }
 
-init().catch(() => {
-  showToast("초기화 중 오류가 발생했습니다");
-});
+init().catch(() => showToast("초기화 중 오류가 발생했습니다"));
