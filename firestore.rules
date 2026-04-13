@@ -1,0 +1,17 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rankings/{nickname} {
+      allow read: if true;
+      allow create, update: if true;
+    }
+
+    match /userStats/{nickname} {
+      allow read, write: if true;
+      match /questions/{questionId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
