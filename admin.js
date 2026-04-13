@@ -122,7 +122,8 @@ googleLoginBtn.addEventListener("click", async () => {
   try {
     await signInWithPopup(auth, provider);
   } catch (e) {
-    showToast("로그인에 실패했습니다");
+    console.error("Google login error:", e);
+    showToast(`${e.code || "unknown"}: ${e.message || "로그인 실패"}`, 5000);
   }
 });
 
