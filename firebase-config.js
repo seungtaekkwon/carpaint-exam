@@ -1,11 +1,11 @@
 window.FIREBASE_CONFIG = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME",
-  projectId: "REPLACE_ME",
-  storageBucket: "REPLACE_ME",
-  messagingSenderId: "REPLACE_ME",
-  appId: "REPLACE_ME",
-  measurementId: "REPLACE_ME",
+  apiKey: "AIzaSyCYoom4vOd40XH_mjo4UdJuzSeOlvAvym8",
+  authDomain: "carpaint-exam.firebaseapp.com",
+  projectId: "carpaint-exam",
+  storageBucket: "carpaint-exam.firebasestorage.app",
+  messagingSenderId: "207058689447",
+  appId: "1:207058689447:web:a560a62e00e0e2c88eaa82",
+  measurementId: "G-L9D3MBL68R",
   adminEmails: [
     "seungtaekkwon151@gmail.com"
   ]
