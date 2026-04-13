@@ -1,4 +1,3 @@
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore,
@@ -46,14 +45,13 @@ let selectedQuestions = [];
 let answers = {};
 let timer = null;
 let remainingSeconds = EXAM_MINUTES * 60;
-let startedAt = null;
 let submitted = false;
 
-function showToast(msg) {
+function showToast(msg, duration = 2600) {
   toast.textContent = msg;
   toast.classList.remove("hidden");
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => toast.classList.add("hidden"), 2600);
+  showToast._t = setTimeout(() => toast.classList.add("hidden"), duration);
 }
 
 function normalizeNickname(value) {
@@ -80,7 +78,7 @@ function formatTime(sec) {
 }
 
 function escapeHtml(str = "") {
-  return str
+  return String(str)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
@@ -107,7 +105,6 @@ function chooseBalancedQuestions(allQuestions, count) {
   });
 
   let assigned = targetByCat.reduce((sum, x) => sum + x.target, 0);
-
   while (assigned > count) {
     const item = targetByCat.sort((a, b) => b.target - a.target).find(x => x.target > 1);
     if (!item) break;
@@ -140,253 +137,279 @@ function chooseBalancedQuestions(allQuestions, count) {
   return shuffle(selected);
 }
 
-function renderExam() {
-  examContainer.innerHTML = "";
-  selectedQuestions.forEach((q, idx) => {
-    const card = document.createElement("section");
-    card.className = "question-card";
-    card.id = `q-${q.id}`;
-    card.innerHTML = `
-      <div class="q-meta">
-        <span class="badge">문항 ${idx + 1}</span>
-        <span class="badge cat">${escapeHtml(q.category)}</span>
-        <span class="badge">문제은행 #${q.id}</span>
-      </div>
-      <div class="question-text">${escapeHtml(q.question)}</div>
-      <div class="choice-list">
-        ${q.choices.map((choice, i) => `
-          <label class="choice" data-choice="${i + 1}">
-            <input type="radio" name="answer-${q.id}" value="${i + 1}" ${submitted ? "disabled" : ""} />
-            <div><strong>${i + 1}.</strong> ${escapeHtml(choice)}</div>
-          </label>
-        `).join("")}
-      </div>
-    `;
-    examContainer.appendChild(card);
-  });
+function updateSubmitState() {
+  const answered = Object.keys(answers).length;
+  const allAnswered = answered === EXAM_COUNT;
+  submitBtn.classList.toggle("soft-disabled", !allAnswered);
+  submitBtn.setAttribute("aria-disabled", String(!allAnswered));
+  submitBtn.title = allAnswered ? "제출하기" : "모든 문항에 답변을 체크해주세요";
+}
 
-  examContainer.querySelectorAll('input[type="radio"]').forEach(input => {
-    input.addEventListener("change", (e) => {
-      const qid = Number(e.target.name.replace("answer-", ""));
-      answers[qid] = Number(e.target.value);
-      updateProgress();
+function getFirstUnanswered() {
+  for (let i = 0; i < selectedQuestions.length; i++) {
+    const q = selectedQuestions[i];
+    if (!(q.id in answers)) return q;
+  }
+  return null;
+}
+
+function renderQuestions() {
+  examContainer.innerHTML = selectedQuestions.map((q, idx) => {
+    const choicesHtml = q.choices.map((choice, cidx) => `
+      <label class="choice" id="q-${q.id}-choice-${cidx + 1}">
+        <input type="radio" name="q-${q.id}" value="${cidx + 1}" ${submitted ? "disabled" : ""} />
+        <span><strong>${cidx + 1}.</strong> ${escapeHtml(choice)}</span>
+      </label>
+    `).join("");
+
+    return `
+      <section class="question-card" id="question-${q.id}" data-question-id="${q.id}">
+        <div class="q-meta">
+          <span class="badge">${idx + 1}번</span>
+          <span class="badge cat">${escapeHtml(q.category)}</span>
+        </div>
+        <div class="question-text">${escapeHtml(q.question)}</div>
+        <div class="choice-list">${choicesHtml}</div>
+        <div class="after-submit"></div>
+      </section>
+    `;
+  }).join("");
+
+  for (const q of selectedQuestions) {
+    const radios = document.querySelectorAll(`input[name="q-${q.id}"]`);
+    radios.forEach(radio => {
+      radio.addEventListener("change", (e) => {
+        answers[q.id] = Number(e.target.value);
+        updateProgress();
+        updateSubmitState();
+      });
     });
-  });
+  }
 }
 
 function updateProgress() {
-  const count = Object.keys(answers).length;
-  answeredCountEl.textContent = count;
-  progressBar.style.width = `${(count / EXAM_COUNT) * 100}%`;
+  const answered = Object.keys(answers).length;
+  answeredCountEl.textContent = answered;
+  progressBar.style.width = `${(answered / EXAM_COUNT) * 100}%`;
+}
+
+function lockAllChoices() {
+  document.querySelectorAll('input[type="radio"]').forEach(el => el.disabled = true);
+}
+
+function revealResults(extraWarnings = {}) {
+  let correct = 0;
+  selectedQuestions.forEach((q, idx) => {
+    const selected = answers[q.id];
+    if (selected === q.answer) correct += 1;
+
+    q.choices.forEach((_, cidx) => {
+      const label = document.getElementById(`q-${q.id}-choice-${cidx + 1}`);
+      if (!label) return;
+      if (cidx + 1 === q.answer) label.classList.add("correct");
+      if (selected === cidx + 1 && selected !== q.answer) label.classList.add("incorrect");
+    });
+
+    const after = document.querySelector(`#question-${q.id} .after-submit`);
+    const warning = extraWarnings[q.id] ? `<div class="warning-note">${WARNING_TEXT}</div>` : "";
+    after.innerHTML = `
+      ${warning}
+      <div class="explanation">
+정답: ${q.answer}번
+내 답: ${selected ? `${selected}번` : "미응답"}
+
+해설:
+${escapeHtml(q.explanation || "해설이 없습니다.")}
+      </div>
+    `;
+  });
+  return correct;
 }
 
 function startTimer() {
   timerEl.textContent = formatTime(remainingSeconds);
+  clearInterval(timer);
   timer = setInterval(() => {
     remainingSeconds -= 1;
-    timerEl.textContent = formatTime(Math.max(remainingSeconds, 0));
+    timerEl.textContent = formatTime(remainingSeconds);
     if (remainingSeconds <= 0) {
       clearInterval(timer);
-      submitExam(true);
+      handleSubmit(true);
     }
   }, 1000);
 }
 
-async function loadRanking() {
-  if (!db) return;
-  const q = query(collection(db, "rankings"), orderBy("bestScore", "desc"), orderBy("bestElapsedSec", "asc"), limit(10));
-  const snap = await getDocs(q);
-  rankingList.innerHTML = "";
-  if (snap.empty) {
-    rankingList.innerHTML = '<div class="help">아직 랭킹이 없습니다.</div>';
+function loadFirebase() {
+  try {
+    const config = window.FIREBASE_CONFIG;
+    if (!config || !config.apiKey || config.apiKey === "REPLACE_ME") {
+      throw new Error("config missing");
+    }
+    const app = initializeApp(config);
+    db = getFirestore(app);
+  } catch (e) {
+    db = null;
+  }
+}
+
+async function fetchQuestions() {
+  const res = await fetch("./questions.json");
+  if (!res.ok) throw new Error("questions.json 로드 실패");
+  questions = await res.json();
+}
+
+async function recordAttempt(score, elapsedSeconds, warningsMap) {
+  if (!db) {
+    rankingStatus.textContent = "Firebase 미연결";
     return;
   }
-  let pos = 1;
-  snap.forEach(docSnap => {
-    const item = docSnap.data();
-    const el = document.createElement("div");
-    el.className = "rank-item";
-    el.innerHTML = `
-      <div class="rank-pos">${pos}</div>
-      <div class="rank-name">${escapeHtml(item.nickname || docSnap.id)}</div>
-      <div class="rank-score">${item.bestScore ?? 0}점</div>
-      <div class="rank-time">${formatTime(item.bestElapsedSec ?? 0)}</div>
-    `;
-    rankingList.appendChild(el);
-    pos += 1;
-  });
-}
 
-async function initFirebase() {
-  const cfg = window.FIREBASE_CONFIG;
-  if (!cfg || cfg.apiKey === "REPLACE_ME") {
-    showToast("firebase-config.js에 Firebase 설정값을 먼저 넣어주세요.");
-    return null;
-  }
-  const app = initializeApp(cfg);
-  db = getFirestore(app);
-  return db;
-}
+  try {
+    const userRef = doc(db, "users", nickname);
+    const userSnap = await getDoc(userRef);
 
-async function applyRanking(score, elapsedSec) {
-  if (!db) return "Firebase 미연결";
-  const ref = doc(db, "rankings", nickname);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      nickname,
-      bestScore: score,
-      bestElapsedSec: elapsedSec,
-      updatedAt: serverTimestamp()
-    });
-    return "신규 등록";
-  }
-  const data = snap.data();
-  const better = score > (data.bestScore ?? -1) ||
-    (score === (data.bestScore ?? -1) && elapsedSec < (data.bestElapsedSec ?? Infinity));
-  if (better) {
-    await updateDoc(ref, {
-      nickname,
-      bestScore: score,
-      bestElapsedSec: elapsedSec,
-      updatedAt: serverTimestamp()
-    });
-    return "기록 갱신";
-  }
-  return "기존 기록 유지";
-}
-
-async function incrementWrongCount(questionId) {
-  if (!db) return 0;
-  const ref = doc(db, "userStats", nickname, "questions", String(questionId));
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      questionId,
-      wrongCount: 1,
-      updatedAt: serverTimestamp()
-    });
-    return 1;
-  }
-  const current = snap.data().wrongCount ?? 0;
-  await updateDoc(ref, {
-    wrongCount: increment(1),
-    updatedAt: serverTimestamp()
-  });
-  return current + 1;
-}
-
-function decorateChoices(card, selected, correct) {
-  card.querySelectorAll(".choice").forEach((label, idx) => {
-    const choiceNo = idx + 1;
-    if (choiceNo === correct) label.classList.add("correct");
-    if (selected === choiceNo && selected !== correct) label.classList.add("incorrect");
-    const radio = label.querySelector("input");
-    radio.disabled = true;
-    if (selected === choiceNo) radio.checked = true;
-  });
-}
-
-async function submitExam(auto = false) {
-  if (submitted) return;
-  submitted = true;
-  clearInterval(timer);
-
-  const elapsedSec = EXAM_MINUTES * 60 - Math.max(remainingSeconds, 0);
-  let correct = 0;
-
-  for (const q of selectedQuestions) {
-    const userAnswer = answers[q.id] || null;
-    if (userAnswer === q.answer) correct += 1;
-  }
-  const score = Math.round((correct / EXAM_COUNT) * 100);
-
-  for (const q of selectedQuestions) {
-    const card = document.getElementById(`q-${q.id}`);
-    const userAnswer = answers[q.id] || null;
-    decorateChoices(card, userAnswer, q.answer);
-
-    let warningHtml = "";
-    if (userAnswer !== q.answer) {
-      const wrongCount = await incrementWrongCount(q.id);
-      if (wrongCount >= WRONG_THRESHOLD) {
-        warningHtml = `<div class="warning-note">${WARNING_TEXT}</div>`;
+    if (!userSnap.exists()) {
+      await setDoc(userRef, {
+        nickname,
+        bestScore: score,
+        bestElapsed: elapsedSeconds,
+        updatedAt: serverTimestamp()
+      });
+    } else {
+      const old = userSnap.data();
+      const shouldUpdate = score > (old.bestScore ?? -1) || (score === (old.bestScore ?? -1) && elapsedSeconds < (old.bestElapsed ?? 999999));
+      if (shouldUpdate) {
+        await updateDoc(userRef, {
+          bestScore: score,
+          bestElapsed: elapsedSeconds,
+          updatedAt: serverTimestamp()
+        });
       }
     }
 
-    const exp = document.createElement("div");
-    exp.className = "explanation";
-    exp.innerHTML = `
-      <div><strong>정답:</strong> ${q.answer}번</div>
-      ${warningHtml}
-      <div style="margin-top:10px;"><strong>해설</strong></div>
-      <div style="margin-top:6px;">${escapeHtml(q.explanation).replaceAll("\n", "<br>")}</div>
-    `;
-    card.appendChild(exp);
-  }
-
-  scoreText.textContent = `${score}점`;
-  correctText.textContent = `${correct} / ${EXAM_COUNT}`;
-  elapsedText.textContent = formatTime(elapsedSec);
-  rankingStatus.textContent = db ? "반영 중..." : "Firebase 미연결";
-
-  if (db) {
-    try {
-      rankingStatus.textContent = await applyRanking(score, elapsedSec);
-      await loadRanking();
-    } catch (err) {
-      console.error(err);
-      rankingStatus.textContent = "반영 실패";
-      showToast("Firebase 저장 중 오류가 발생했습니다.");
+    for (const q of selectedQuestions) {
+      const selected = answers[q.id];
+      if (selected !== q.answer) {
+        const wrongRef = doc(db, "users", nickname, "wrongQuestions", String(q.id));
+        const wrongSnap = await getDoc(wrongRef);
+        if (!wrongSnap.exists()) {
+          await setDoc(wrongRef, { count: 1, questionId: q.id, updatedAt: serverTimestamp() });
+          warningsMap[q.id] = false;
+        } else {
+          await updateDoc(wrongRef, { count: increment(1), updatedAt: serverTimestamp() });
+          const nextCount = (wrongSnap.data().count || 0) + 1;
+          warningsMap[q.id] = nextCount >= WRONG_THRESHOLD;
+        }
+      }
     }
-  } else {
-    await loadRanking().catch(() => {});
-  }
 
-  resultCard.classList.remove("hidden");
-  submitBtn.disabled = true;
-  if (auto) {
-    showToast("시간이 종료되어 자동 제출되었습니다.");
-  } else {
-    showToast("제출이 완료되었습니다.");
+    rankingStatus.textContent = "저장 완료";
+  } catch (e) {
+    rankingStatus.textContent = "저장 실패";
   }
-
-  resultCard.scrollIntoView({ behavior: "smooth" });
 }
 
-async function startExam() {
-  nickname = normalizeNickname(nicknameInput.value);
-  if (!validNickname(nickname)) {
-    showToast("닉네임은 2~12자의 한글/영문/숫자만 사용할 수 있습니다.");
-    nicknameInput.focus();
+async function loadRanking() {
+  if (!db) {
+    rankingList.innerHTML = '<div class="help">Firebase 미연결 상태입니다.</div>';
+    return;
+  }
+  try {
+    const qy = query(collection(db, "users"), orderBy("bestScore", "desc"), orderBy("bestElapsed", "asc"), limit(20));
+    const snap = await getDocs(qy);
+    const docs = snap.docs.map(d => d.data());
+    if (!docs.length) {
+      rankingList.innerHTML = '<div class="help">아직 랭킹 데이터가 없습니다.</div>';
+      return;
+    }
+    rankingList.innerHTML = docs.map((item, i) => `
+      <div class="rank-item">
+        <div class="rank-pos">${i + 1}위</div>
+        <div class="rank-name">${escapeHtml(item.nickname || "-")}</div>
+        <div class="rank-score">${item.bestScore ?? 0}점</div>
+        <div class="rank-time">${formatTime(item.bestElapsed ?? 0)}</div>
+      </div>
+    `).join("");
+  } catch (e) {
+    rankingList.innerHTML = '<div class="help">랭킹을 불러오지 못했습니다.</div>';
+  }
+}
+
+async function handleSubmit(auto = false) {
+  if (submitted) return;
+
+  const firstUnanswered = getFirstUnanswered();
+  if (!auto && firstUnanswered) {
+    showToast("모든 문항에 답변을 체크해주세요");
+    document.getElementById(`question-${firstUnanswered.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
-  if (!questions.length) {
-    const res = await fetch("./questions.json");
-    questions = await res.json();
-  }
-  selectedQuestions = chooseBalancedQuestions(questions, EXAM_COUNT);
-  answers = {};
-  remainingSeconds = EXAM_MINUTES * 60;
-  startedAt = Date.now();
-  submitted = false;
+  submitted = true;
+  clearInterval(timer);
+  lockAllChoices();
+  submitBtn.classList.add("soft-disabled");
+  submitBtn.setAttribute("aria-disabled", "true");
 
-  nicknameDisplay.textContent = `응시자: ${nickname}`;
+  const warningsMap = {};
+  let correct = revealResults(warningsMap);
+  const score = Math.round((correct / EXAM_COUNT) * 100);
+  const elapsed = EXAM_MINUTES * 60 - Math.max(remainingSeconds, 0);
+
+  nicknameDisplay.textContent = nickname;
+  scoreText.textContent = `${score}점`;
+  correctText.textContent = `${correct} / ${EXAM_COUNT}`;
+  elapsedText.textContent = formatTime(elapsed);
+  resultCard.classList.remove("hidden");
+
+  await recordAttempt(score, elapsed, warningsMap);
+
+  // Re-render with warnings after DB save
+  correct = revealResults(warningsMap);
+  await loadRanking();
+  resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function resetExam() {
+  answers = {};
+  selectedQuestions = chooseBalancedQuestions(questions, EXAM_COUNT);
+  remainingSeconds = EXAM_MINUTES * 60;
+  submitted = false;
   introCard.classList.add("hidden");
   statusCard.classList.remove("hidden");
   examContainer.classList.remove("hidden");
   resultCard.classList.add("hidden");
-  submitBtn.disabled = false;
-  renderExam();
+  rankingStatus.textContent = "대기";
+  nicknameDisplay.textContent = nickname;
+  renderQuestions();
   updateProgress();
+  updateSubmitState();
   startTimer();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-startBtn.addEventListener("click", startExam);
-submitBtn.addEventListener("click", () => submitExam(false));
-retryBtn.addEventListener("click", () => window.location.reload());
+startBtn.addEventListener("click", async () => {
+  const value = normalizeNickname(nicknameInput.value);
+  if (!validNickname(value)) {
+    showToast("닉네임은 2~12자의 한글/영문/숫자만 가능합니다");
+    nicknameInput.focus();
+    return;
+  }
+  nickname = value;
+  resetExam();
+});
 
-await initFirebase();
-await loadRanking().catch(() => {});
+submitBtn.addEventListener("click", () => handleSubmit(false));
+retryBtn.addEventListener("click", () => resetExam());
+
+async function init() {
+  loadFirebase();
+  await fetchQuestions();
+  submitBtn.classList.add("soft-disabled");
+  submitBtn.setAttribute("aria-disabled", "true");
+  await loadRanking();
+}
+
+init().catch(() => {
+  showToast("초기화 중 오류가 발생했습니다");
+});
