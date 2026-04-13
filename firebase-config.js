@@ -1,16 +1,4 @@
-// Firebase 프로젝트 설정값을 아래에 붙여 넣으세요.
-// 예시:
-// window.FIREBASE_CONFIG = {
-//   apiKey: "....",
-//   authDomain: "....",
-//   projectId: "....",
-//   storageBucket: "....",
-//   messagingSenderId: "....",
-//   appId: "...."
-// };
-
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
+window.FIREBASE_CONFIG = {
   apiKey: "AIzaSyCYoom4vOd40XH_mjo4UdJuzSeOlvAvym8",
   authDomain: "carpaint-exam.firebaseapp.com",
   projectId: "carpaint-exam",
