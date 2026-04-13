@@ -240,9 +240,18 @@ function loadFirebase() {
 }
 
 async function fetchQuestions() {
-  const res = await fetch("./questions.json");
-  if (!res.ok) throw new Error("questions.json 로드 실패");
-  questions = await res.json();
+  const res = await fetch("./questions.json", { cache: "no-store" });
+  if (!res.ok) throw new Error(`questions.json 로드 실패: ${res.status}`);
+
+  const text = await res.text();
+  console.log("questions.json first 200 chars:", text.slice(0, 200));
+
+  try {
+    questions = JSON.parse(text);
+  } catch (e) {
+    console.error("questions.json parse error:", e);
+    throw new Error(`questions.json 파싱 실패: ${e.message}`);
+  }
 }
 
 async function recordWrongAttempts(warningsMap) {
@@ -343,4 +352,7 @@ async function init() {
   updateSubmitState();
 }
 
-init().catch(() => showToast("초기화 중 오류가 발생했습니다"));
+init().catch((e) => {
+  console.error("init error:", e);
+  showToast(`${e?.message || e}`, 5000);
+});
