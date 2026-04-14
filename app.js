@@ -44,7 +44,13 @@ function showToast(msg, duration = 2600) {
   toast.textContent = msg;
   toast.classList.remove("hidden");
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => toast.classList.add("hidden"), duration);
+  if (duration > 0) {
+    showToast._t = setTimeout(() => toast.classList.add("hidden"), duration);
+  }
+}
+function hideToast() {
+  clearTimeout(showToast._t);
+  toast.classList.add("hidden");
 }
 
 function normalizeNickname(value) {
@@ -300,7 +306,7 @@ function buildWrongNoteHtml() {
     const warning = selected !== q.answer ? `<div class="pdf-warning-note">${WARNING_TEXT}</div>` : "";
 
     return `
-      <section class="pdf-question-card">
+      <section class="pdf-question-card" data-card-index="${idx}">
         <div class="pdf-q-meta">
           <span class="pdf-badge">${idx + 1}번 오답</span>
           <span class="pdf-badge cat">${escapeHtml(q.category)}</span>
@@ -318,14 +324,25 @@ ${escapeHtml(q.explanation || "해설이 없습니다.")}</div>
   }).join("");
 
   return `
-    <div class="pdf-sheet">
-      <div class="pdf-header">
-        <h1>오답노트</h1>
-        <p>닉네임: ${escapeHtml(nickname)} · 오답 수: ${wrongQuestions.length}문항 · 생성일시: ${new Date().toLocaleString("ko-KR")}</p>
+    <div class="pdf-render-root" id="pdfRenderRoot">
+      <div class="pdf-sheet">
+        <div class="pdf-header" id="pdfHeader">
+          <h1>오답노트</h1>
+          <p>닉네임: ${escapeHtml(nickname)} · 오답 수: ${wrongQuestions.length}문항 · 생성일시: ${new Date().toLocaleString("ko-KR")}</p>
+        </div>
+        ${cards}
       </div>
-      ${cards}
     </div>
   `;
+}
+
+async function renderElementToCanvas(el) {
+  return await window.html2canvas(el, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: "#ffffff",
+    logging: false
+  });
 }
 
 async function downloadWrongNotePdf() {
@@ -338,51 +355,59 @@ async function downloadWrongNotePdf() {
     showToast("오답이 없습니다");
     return;
   }
-  if (typeof html2pdf === "undefined") {
+  if (!window.html2canvas || !window.jspdf?.jsPDF) {
     showToast("PDF 라이브러리를 불러오지 못했습니다");
     return;
   }
 
+  showToast("오답노트 PDF를 생성하고 있습니다.", 0);
+
   const wrapper = document.createElement("div");
   wrapper.innerHTML = buildWrongNoteHtml();
-  const element = wrapper.firstElementChild;
-
-  element.style.position = "absolute";
-  element.style.left = "-99999px";
-  element.style.top = "0";
-  element.style.width = "1000px";
-
-  document.body.appendChild(element);
-
-  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  await new Promise(resolve => setTimeout(resolve, 250));
-
-  const opt = {
-    margin: [8, 8, 8, 8],
-    filename: `${nickname || "사용자"}_오답노트.pdf`,
-    image: { type: "jpeg", quality: 0.98 },
-    html2canvas: {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: "#f3f4f8",
-      logging: false
-    },
-    jsPDF: {
-      unit: "mm",
-      format: "a4",
-      orientation: "portrait"
-    },
-    pagebreak: { mode: ["css", "legacy"] }
-  };
+  const root = wrapper.firstElementChild;
+  document.body.appendChild(root);
 
   try {
-    await html2pdf().set(opt).from(element).save();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const usableWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const headerEl = root.querySelector("#pdfHeader");
+    const cardEls = [...root.querySelectorAll(".pdf-question-card")];
+
+    const headerCanvas = await renderElementToCanvas(headerEl);
+    const headerHeight = usableWidth * (headerCanvas.height / headerCanvas.width);
+    pdf.addImage(headerCanvas.toDataURL("image/jpeg", 0.98), "JPEG", margin, y, usableWidth, headerHeight);
+    y += headerHeight + 6;
+
+    for (let i = 0; i < cardEls.length; i++) {
+      const canvas = await renderElementToCanvas(cardEls[i]);
+      const imgHeight = usableWidth * (canvas.height / canvas.width);
+
+      if (y + imgHeight > pageHeight - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.98), "JPEG", margin, y, usableWidth, imgHeight);
+      y += imgHeight + 5;
+    }
+
+    pdf.save(`${nickname || "사용자"}_오답노트.pdf`);
+    hideToast();
   } catch (e) {
     console.error("PDF 생성 오류:", e);
-    showToast("PDF 생성 중 오류가 발생했습니다");
+    showToast("PDF 생성 중 오류가 발생했습니다", 5000);
   } finally {
-    if (document.body.contains(element)) {
-      document.body.removeChild(element);
+    if (document.body.contains(root)) {
+      document.body.removeChild(root);
     }
   }
 }
@@ -403,6 +428,8 @@ async function handleSubmit(auto = false) {
   submitBtn.classList.add("soft-disabled");
   submitBtn.setAttribute("aria-disabled", "true");
 
+  showToast("채점 진행 및 오답노트 자료 준비중입니다.", 0);
+
   const warningsMap = {};
   let correct = revealResults(warningsMap);
   const score = Math.round((correct / EXAM_COUNT) * 100);
@@ -421,6 +448,10 @@ async function handleSubmit(auto = false) {
   elapsedText.textContent = formatTime(elapsed);
   resultCard.classList.remove("hidden");
   resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  setTimeout(() => {
+    hideToast();
+  }, 300);
 }
 
 function resetExam() {
