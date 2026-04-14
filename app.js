@@ -17,6 +17,7 @@ const nicknameInput = document.getElementById("nickname");
 const startBtn = document.getElementById("startBtn");
 const submitBtn = document.getElementById("submitBtn");
 const retryBtn = document.getElementById("retryBtn");
+const downloadWrongPdfBtn = document.getElementById("downloadWrongPdfBtn");
 const introCard = document.getElementById("introCard");
 const statusCard = document.getElementById("statusCard");
 const examContainer = document.getElementById("examContainer");
@@ -242,16 +243,8 @@ function loadFirebase() {
 async function fetchQuestions() {
   const res = await fetch("./questions.json", { cache: "no-store" });
   if (!res.ok) throw new Error(`questions.json 로드 실패: ${res.status}`);
-
   const text = await res.text();
-  console.log("questions.json first 200 chars:", text.slice(0, 200));
-
-  try {
-    questions = JSON.parse(text);
-  } catch (e) {
-    console.error("questions.json parse error:", e);
-    throw new Error(`questions.json 파싱 실패: ${e.message}`);
-  }
+  questions = JSON.parse(text);
 }
 
 async function recordWrongAttempts(warningsMap) {
@@ -277,6 +270,109 @@ async function recordWrongAttempts(warningsMap) {
       }
     }
   }
+}
+
+function buildWrongNoteHtml() {
+  const wrongQuestions = selectedQuestions.filter(q => answers[q.id] !== q.answer);
+  if (!wrongQuestions.length) return "";
+
+  const cards = wrongQuestions.map((q, idx) => {
+    const selected = answers[q.id];
+    const choicesHtml = q.choices.map((choice, cidx) => {
+      const no = cidx + 1;
+      const classes = [
+        "pdf-choice",
+        no === q.answer ? "correct" : "",
+        selected === no && selected !== q.answer ? "incorrect" : ""
+      ].filter(Boolean).join(" ");
+      let mark = `${no}번`;
+      if (selected === no && no === q.answer) mark = "내 답 / 정답";
+      else if (selected === no) mark = "내 답";
+      else if (no === q.answer) mark = "정답";
+      return `
+        <div class="${classes}">
+          <div class="mark">${mark}</div>
+          <div><strong>${no}.</strong> ${escapeHtml(choice)}</div>
+        </div>
+      `;
+    }).join("");
+
+    const warning = selected !== q.answer ? `<div class="pdf-warning-note">${WARNING_TEXT}</div>` : "";
+
+    return `
+      <section class="pdf-question-card">
+        <div class="pdf-q-meta">
+          <span class="pdf-badge">${idx + 1}번 오답</span>
+          <span class="pdf-badge cat">${escapeHtml(q.category)}</span>
+        </div>
+        <div class="pdf-question-text">${escapeHtml(q.question)}</div>
+        <div class="pdf-choice-list">${choicesHtml}</div>
+        ${warning}
+        <div class="pdf-explanation">정답: ${q.answer}번
+내 답: ${selected ? `${selected}번` : "미응답"}
+
+해설:
+${escapeHtml(q.explanation || "해설이 없습니다.")}</div>
+      </section>
+    `;
+  }).join("");
+
+  return `
+    <div class="pdf-sheet">
+      <div class="pdf-header">
+        <h1>오답노트</h1>
+        <p>닉네임: ${escapeHtml(nickname)} · 오답 수: ${wrongQuestions.length}문항 · 생성일시: ${new Date().toLocaleString("ko-KR")}</p>
+      </div>
+      ${cards}
+    </div>
+  `;
+}
+
+function downloadWrongNotePdf() {
+  if (!submitted) {
+    showToast("시험을 먼저 제출해 주세요");
+    return;
+  }
+  const wrongQuestions = selectedQuestions.filter(q => answers[q.id] !== q.answer);
+  if (!wrongQuestions.length) {
+    showToast("오답이 없습니다");
+    return;
+  }
+  if (typeof html2pdf === "undefined") {
+    showToast("PDF 라이브러리를 불러오지 못했습니다");
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = buildWrongNoteHtml();
+  const element = wrapper.firstElementChild;
+  document.body.appendChild(element);
+
+  const opt = {
+    margin: [8, 8, 8, 8],
+    filename: `${nickname || "사용자"}_오답노트.pdf`,
+    image: { type: "jpeg", quality: 0.98 },
+    html2canvas: {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: "#f3f4f8"
+    },
+    jsPDF: {
+      unit: "mm",
+      format: "a4",
+      orientation: "portrait"
+    },
+    pagebreak: { mode: ["css", "legacy"] }
+  };
+
+  html2pdf().set(opt).from(element).save()
+    .then(() => {
+      if (document.body.contains(element)) document.body.removeChild(element);
+    })
+    .catch(() => {
+      if (document.body.contains(element)) document.body.removeChild(element);
+      showToast("PDF 생성 중 오류가 발생했습니다");
+    });
 }
 
 async function handleSubmit(auto = false) {
@@ -345,6 +441,7 @@ startBtn.addEventListener("click", async () => {
 
 submitBtn.addEventListener("click", () => handleSubmit(false));
 retryBtn.addEventListener("click", () => resetExam());
+if (downloadWrongPdfBtn) downloadWrongPdfBtn.addEventListener("click", downloadWrongNotePdf);
 
 async function init() {
   loadFirebase();
@@ -354,5 +451,5 @@ async function init() {
 
 init().catch((e) => {
   console.error("init error:", e);
-  showToast(`${e?.message || e}`, 5000);
+  showToast(`${e?.message || "초기화 중 오류가 발생했습니다"}`, 5000);
 });

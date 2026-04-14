@@ -54,8 +54,8 @@ async function getAllowedAdmins() {
   const snap = await getDoc(ref);
   if (!snap.exists()) {
     const initial = config.adminEmails && Array.isArray(config.adminEmails) ? config.adminEmails : [];
-    await setDoc(ref, { emails: initial });
-    return initial;
+    await setDoc(ref, { emails: initial.map(v => v.toLowerCase()) });
+    return initial.map(v => v.toLowerCase());
   }
   return snap.data().emails || [];
 }
