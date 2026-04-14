@@ -328,7 +328,7 @@ ${escapeHtml(q.explanation || "해설이 없습니다.")}</div>
   `;
 }
 
-function downloadWrongNotePdf() {
+async function downloadWrongNotePdf() {
   if (!submitted) {
     showToast("시험을 먼저 제출해 주세요");
     return;
@@ -346,7 +346,16 @@ function downloadWrongNotePdf() {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = buildWrongNoteHtml();
   const element = wrapper.firstElementChild;
+
+  element.style.position = "absolute";
+  element.style.left = "-99999px";
+  element.style.top = "0";
+  element.style.width = "1000px";
+
   document.body.appendChild(element);
+
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await new Promise(resolve => setTimeout(resolve, 250));
 
   const opt = {
     margin: [8, 8, 8, 8],
@@ -355,7 +364,8 @@ function downloadWrongNotePdf() {
     html2canvas: {
       scale: 2,
       useCORS: true,
-      backgroundColor: "#f3f4f8"
+      backgroundColor: "#f3f4f8",
+      logging: false
     },
     jsPDF: {
       unit: "mm",
@@ -365,14 +375,16 @@ function downloadWrongNotePdf() {
     pagebreak: { mode: ["css", "legacy"] }
   };
 
-  html2pdf().set(opt).from(element).save()
-    .then(() => {
-      if (document.body.contains(element)) document.body.removeChild(element);
-    })
-    .catch(() => {
-      if (document.body.contains(element)) document.body.removeChild(element);
-      showToast("PDF 생성 중 오류가 발생했습니다");
-    });
+  try {
+    await html2pdf().set(opt).from(element).save();
+  } catch (e) {
+    console.error("PDF 생성 오류:", e);
+    showToast("PDF 생성 중 오류가 발생했습니다");
+  } finally {
+    if (document.body.contains(element)) {
+      document.body.removeChild(element);
+    }
+  }
 }
 
 async function handleSubmit(auto = false) {
